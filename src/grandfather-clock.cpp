@@ -267,9 +267,9 @@ void setup() {
   runner.addTask(audioFileCheck);
   runner.addTask(requestRead);
   runner.addTask(ftpTask);
-  // sqsTask.enable();
-  // timeTask.enable();
-  // audioFileCheck.enable();
+  sqsTask.enableDelayed(6000);
+  timeTask.enableDelayed(10000);
+  audioFileCheck.enableDelayed(10000);
   ftpTask.enable();
 
 
@@ -403,7 +403,8 @@ void receiveMessageCallback() {
 }
 
 void sqsCallback() {
-  if (WiFi.status() == WL_CONNECTED) {
+  struct tm timeinfo;
+  if (WiFi.status() == WL_CONNECTED && !getLocalTime(&timeinfo)) {
     Serial.println("GET /xxxxxxxxxxx/ClockQueue.fifo?Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
     aws.doGet("/xxxxxxxxxxx/ClockQueue.fifo", "Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
     httpCallback = &receiveMessageCallback;
@@ -429,5 +430,4 @@ void ftpCallback(){
 }
 void loop() {
   runner.execute();
-  Serial.print(".");
 }

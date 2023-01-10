@@ -89,13 +89,13 @@ void ESPAWSClient::send(const String request) {
   setInsecure();
   if (connect(FQDN().c_str(), 443)) {
     // Send our request
-    setTimeout(30000);
+    // setTimeout(30000);
     print(request);
   }
 }
 bool ESPAWSClient::receiveReady() {
   if(!connected()) return true;
-  return peek() >= 0;
+  return available() > 0;
 }
 AWSResponse ESPAWSClient::receive() {
   AWSResponse response;
