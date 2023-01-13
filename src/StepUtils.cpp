@@ -50,6 +50,13 @@ bool Stepper::resetToZeroStep() {
   return false;
 }
 
+void Stepper::forceMove(int degrees) {
+  enable();
+  rotate(degrees);
+  step = 0;
+  disable();
+}
+
 void Stepper::initialize(){
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIRECTION_PIN, OUTPUT);

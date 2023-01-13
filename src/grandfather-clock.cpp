@@ -10,13 +10,13 @@
 #include "StepUtils.h"
 #include "UrlUtils.h"
 #include "auth.h"
+#include <SimpleFTPServer.h>
 #include <SD.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ssl_client.h>
 #include <WiFi.h>
-#include <SimpleFTPServer.h>
 // #include <WiFiUDP.h>
 WiFiClientSecure client;
 HTTPClient http;
@@ -106,6 +106,9 @@ void readState() {
     if(stepper.resetToZeroStep()){
       writeState();
     }
+  }else{
+    Serial.print(stateFilename);
+    Serial.println(" does not exist");
   }
 }
 
@@ -172,8 +175,6 @@ void audioPlaybackCallback(void* params) {
             out = NULL;
           }
         }
-        // delay(5000);
-
         Serial.println("Audio done");
       } else {
         Serial.println("Audio file not found: " + selectedAudioFile);
@@ -200,7 +201,7 @@ void playAudioFile() {
       "AudioPlayback",       /* Name of the task */
       10000,                 /* Stack size in words */
       NULL,                  /* Task input parameter */
-      0,                     /* Priority of the task */
+      5,                     /* Priority of the task */
       &audioPlaybackHandle,  /* Task handle. */
       0);                    /* Core where the task should run */
   }
@@ -244,7 +245,6 @@ void setup() {
     Serial.print(".");
   }
   Serial.println("");
-  delay(2000);
   // timeClient.begin();
 
   // Setup SD Card
@@ -252,6 +252,7 @@ void setup() {
     Serial.println("SD failed!");
     delay(1000);
   }
+  delay(2000);
   // Load old state
   readState();
   getAudioFiles();
@@ -349,6 +350,15 @@ void receiveMessageCallback() {
         Serial.print("Volume set to: ");
         Serial.println(volume);
       }
+
+      if (!doc["degrees"].isNull()) {
+        int degrees = doc["degrees"].as<int>();
+        Serial.print("Moving: ");
+        Serial.print(degrees);
+        Serial.println(" degrees");
+        stepper.forceMove(degrees);
+        writeState();
+      }
       if (!doc["sound"].isNull()) {
         String str = doc["sound"].as<String>();
         str.toLowerCase();
@@ -404,7 +414,7 @@ void receiveMessageCallback() {
 
 void sqsCallback() {
   struct tm timeinfo;
-  if (WiFi.status() == WL_CONNECTED && !getLocalTime(&timeinfo)) {
+  if (WiFi.status() == WL_CONNECTED && getLocalTime(&timeinfo)) {
     Serial.println("GET /xxxxxxxxxxx/ClockQueue.fifo?Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
     aws.doGet("/xxxxxxxxxxx/ClockQueue.fifo", "Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
     httpCallback = &receiveMessageCallback;

@@ -18,6 +18,7 @@ class Stepper {
         bool resetToZeroStep();
         int getStep();
         void setStep(int _step);
+        void forceMove(int degrees);
     protected:
         int direction;
         int step; 
