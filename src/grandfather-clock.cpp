@@ -1,6 +1,3 @@
-#define STORAGE_SPIFFS_FORCE_DISABLE            true
-#define DEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32 	NETWORK_ESP32
-#define DEFAULT_STORAGE_TYPE_ESP32 					    STORAGE_SD
 #include <AudioFileSourceSD.h>
 #include <AudioOutputSPDIF.h>
 #include <AudioGeneratorWAV.h>
@@ -55,7 +52,8 @@ String audioFileList[MAX_AUDIO_FILES];
 int lastHour = -1;
 #define LED_PIN 2
 #define SPDIF_OUT_PIN 27
-#define SPI_SPEED SD_SCK_MHZ(40)
+// #define SPI_SPEED SD_SCK_MHZ(40)
+
 AudioFileSourceSD* source;
 AudioGeneratorWAV* decoder = NULL;
 // AudioOutputSPDIF *out;
