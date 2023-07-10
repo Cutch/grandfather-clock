@@ -8,5 +8,7 @@
     "awsRegion": "us-xxxx-1",
 
     "ftpUsername": "grandfather",
-    "ftpPassword": "clock"
+    "ftpPassword": "clock",
+
+    "rotationDirection": 0
 }

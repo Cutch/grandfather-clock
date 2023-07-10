@@ -1,4 +1,6 @@
-#define STORAGE_SPIFFS_FORCE_DISABLE true
+#define STORAGE_SPIFFS_FORCE_DISABLE            true
+#define DEFAULT_FTP_SERVER_NETWORK_TYPE_ESP32 	NETWORK_ESP32
+#define DEFAULT_STORAGE_TYPE_ESP32 					    STORAGE_SD
 #include <AudioFileSourceSD.h>
 #include <AudioOutputSPDIF.h>
 #include <AudioGeneratorWAV.h>
@@ -10,13 +12,15 @@
 #include <Arduino.h>
 #include "StepUtils.h"
 #include "UrlUtils.h"
-#include <SimpleFTPServer.h>
 #include <SD.h>
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ssl_client.h>
 #include <WiFi.h>
+
+#include <SimpleFTPServer.h>
+
 // #include <WiFiUDP.h>
 WiFiClientSecure client;
 HTTPClient http;
@@ -42,13 +46,14 @@ bool enable = true;
 String selectedAudioFile;
 // End States
 
-byte direction = 0;
+byte rotationDirection = 0;
 File stateFile;
 File configFile;
 #define MAX_AUDIO_FILES 256
 
 String audioFileList[MAX_AUDIO_FILES];
 int lastHour = -1;
+#define LED_PIN 2
 #define SPDIF_OUT_PIN 27
 #define SPI_SPEED SD_SCK_MHZ(40)
 AudioFileSourceSD* source;
@@ -138,6 +143,10 @@ void readConfig() {
     Serial.print("wifiPassword: ");
     Serial.println(wifiPassword);
 
+    rotationDirection = doc["rotationDirection"].as<byte>();
+    Serial.print("rotationDirection: ");
+    Serial.println(rotationDirection);
+
     awsAccessKey = doc["awsAccessKey"].as<String>();
     Serial.print("awsAccessKey: ");
     Serial.println(awsAccessKey);
@@ -195,6 +204,14 @@ void getAudioFiles() {
   Serial.println(" Audio Files");
   for (; i < MAX_AUDIO_FILES; i++) {
     audioFileList[i].clear();
+  }
+}
+void blink(int number, bool longBlink=false){
+  for(int i = 0; i < number; i++){
+    digitalWrite(LED_PIN, HIGH);
+    delay(longBlink?400:200);
+    digitalWrite(LED_PIN, LOW);
+    delay(200);
   }
 }
 #define MAX_PLAYBACK_HANDLES 5
@@ -261,6 +278,7 @@ void connectedToAP(WiFiEvent_t wifi_event, WiFiEventInfo_t wifi_info) {
 void disconnectedFromAP(WiFiEvent_t wifi_event, WiFiEventInfo_t wifi_info) {
   Serial.println("[-] Disconnected from the WiFi AP");
   WiFi.begin((char*)wifiSSID.c_str(), (char*)wifiPassword.c_str());
+  blink(5);
 }
 
 void gotIPFromAP(WiFiEvent_t wifi_event, WiFiEventInfo_t wifi_info) {
@@ -289,8 +307,9 @@ void setup() {
   // Audio should be before SD
   setupAudio();
 
+  pinMode(LED_PIN, OUTPUT);
+  digitalWrite(LED_PIN, LOW);
 
-  delay(2000);
   // Setup SD Card
   while (!SD.begin()) {
     Serial.println("SD failed!");
@@ -304,15 +323,17 @@ void setup() {
 
   initWiFi();
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    blink(1, true);
     Serial.print(".");
   }
   Serial.println("");
-  // timeClient.begin();
+  blink(5);
 
   getAudioFiles();
 
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3);
+
+  delay(2000);
 
   if(!ftpUsername.isEmpty() && !ftpPassword.isEmpty())
     ftpSrv.begin(ftpUsername.c_str(), ftpPassword.c_str());  //username, wifiPassword for ftp.   (default 21, 50009 for PASV)
@@ -346,23 +367,23 @@ void runCuckoo() {
   Serial.println("Cuckoo Time");
   stepper.enable();
   delay(100);
-  stepper.rotate(450);
+  stepper.rotate(450*(rotationDirection?1:-1));
   writeState();
   playAudioFile();
   delay(500);
-  stepper.rotate(-90);
+  stepper.rotate(-90*(rotationDirection?1:-1));
   writeState();
   delay(500);
-  stepper.rotate(90);
+  stepper.rotate(90*(rotationDirection?1:-1));
   writeState();
   delay(500);
-  stepper.rotate(-90);
+  stepper.rotate(-90*(rotationDirection?1:-1));
   writeState();
   delay(500);
-  stepper.rotate(90);
+  stepper.rotate(90*(rotationDirection?1:-1));
   writeState();
   delay(500);
-  stepper.rotate(-450);
+  stepper.rotate(-450*(rotationDirection?1:-1));
   writeState();
   delay(100);
   Serial.println("End Cuckoo Time");
@@ -489,6 +510,7 @@ void timeCallback() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Failed to obtain time");
+    blink(3, true);
     configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3);
     return;
   }
