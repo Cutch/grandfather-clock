@@ -1,3 +1,4 @@
+#define STORAGE_SPIFFS_FORCE_DISABLE true
 #include <AudioFileSourceSD.h>
 #include <AudioOutputSPDIF.h>
 #include <AudioGeneratorWAV.h>
@@ -9,7 +10,6 @@
 #include <Arduino.h>
 #include "StepUtils.h"
 #include "UrlUtils.h"
-#include "auth.h"
 #include <SimpleFTPServer.h>
 #include <SD.h>
 #include <ArduinoJson.h>
@@ -23,16 +23,17 @@ HTTPClient http;
 // WiFiUDP ntpUDP;
 FtpServer ftpSrv;  //set #define FTP_DEBUG in ESP8266FtpServer.h to see ftp verbose on serial
 
-const char* ntpServer = "pool.ntp.org";
+const char* ntpServer1 = "0.pool.ntp.org";
+const char* ntpServer2 = "1.pool.ntp.org";
+const char* ntpServer3 = "2.pool.ntp.org";
 const long gmtOffset_sec = 0;
-const int daylightOffset_sec = 3600;
+const int daylightOffset_sec = 0;
 
 // NTPClient timeClient(ntpUDP);
 const char* stateFilename = "/.state";
-const char* ssid = "xxxxxxxx";
-const char* password = "xxxxxxxxxxxxxx";
+const char* configFilename = "/config.json";
 const char* hostname = "clock";
-ESPAWSClient aws = ESPAWSClient("sqs", ACCESS_KEY, SECRET_KEY, "xx-xxxx-x", "amazonaws.com");
+ESPAWSClient* aws;
 Stepper stepper = Stepper();
 
 // States
@@ -43,7 +44,9 @@ String selectedAudioFile;
 
 byte direction = 0;
 File stateFile;
+File configFile;
 #define MAX_AUDIO_FILES 256
+
 String audioFileList[MAX_AUDIO_FILES];
 int lastHour = -1;
 #define SPDIF_OUT_PIN 27
@@ -67,8 +70,16 @@ Task timeTask(10000, TASK_FOREVER, &timeCallback);
 Task audioFileCheck(30000, TASK_FOREVER, &getAudioFiles);
 Task requestRead(50, TASK_FOREVER, &httpReady);
 Task ftpTask(0, TASK_FOREVER, &ftpCallback);
-
 // End Scheduler
+
+String awsAccessKey;
+String awsSecretKey;
+String sqsQueue;
+String awsRegion;
+String wifiSSID;
+String wifiPassword;
+String ftpUsername;
+String ftpPassword;
 
 void writeState() {
   stateFile = SD.open(stateFilename, FILE_WRITE);
@@ -89,6 +100,7 @@ void readState() {
     Serial.println("Reading Existing State");
     stateFile = SD.open(stateFilename);
     deserializeJson(doc, stateFile);
+    stateFile.close();
     stepper.setStep(doc["step"].as<int>());
     volume = doc["volume"].as<int>();
     enable = doc["enable"].as<bool>();
@@ -109,6 +121,42 @@ void readState() {
   }else{
     Serial.print(stateFilename);
     Serial.println(" does not exist");
+  }
+}
+
+void readConfig() {
+  if (SD.exists(configFilename)) {
+    DynamicJsonDocument doc(2048);
+    Serial.println("Reading Config");
+    configFile = SD.open(configFilename);
+    deserializeJson(doc, configFile);
+    configFile.close();
+    wifiSSID = doc["wifiSSID"].as<String>();
+    wifiPassword = doc["wifiPassword"].as<String>();
+    Serial.print("wifiSSID: ");
+    Serial.println(wifiSSID);
+    Serial.print("wifiPassword: ");
+    Serial.println(wifiPassword);
+
+    awsAccessKey = doc["awsAccessKey"].as<String>();
+    Serial.print("awsAccessKey: ");
+    Serial.println(awsAccessKey);
+    awsSecretKey = doc["awsSecretKey"].as<String>();
+    sqsQueue = doc["sqsQueue"].as<String>();
+    awsRegion = doc["awsRegion"].as<String>();
+    Serial.print("sqsQueue: ");
+    Serial.println(sqsQueue);
+    Serial.print("awsRegion: ");
+    Serial.println(awsRegion);
+
+    ftpUsername = doc["ftpUsername"].as<String>();
+    ftpPassword = doc["ftpPassword"].as<String>();
+    Serial.print("ftpUsername: ");
+    Serial.println(ftpUsername);
+    Serial.print("ftpPassword: ");
+    Serial.println(ftpPassword);
+  }else{
+    Serial.println("Missing config file in the SD card.");
   }
 }
 
@@ -212,7 +260,7 @@ void connectedToAP(WiFiEvent_t wifi_event, WiFiEventInfo_t wifi_info) {
 
 void disconnectedFromAP(WiFiEvent_t wifi_event, WiFiEventInfo_t wifi_info) {
   Serial.println("[-] Disconnected from the WiFi AP");
-  WiFi.begin(ssid, password);
+  WiFi.begin((char*)wifiSSID.c_str(), (char*)wifiPassword.c_str());
 }
 
 void gotIPFromAP(WiFiEvent_t wifi_event, WiFiEventInfo_t wifi_info) {
@@ -221,13 +269,17 @@ void gotIPFromAP(WiFiEvent_t wifi_event, WiFiEventInfo_t wifi_info) {
 }
 
 void initWiFi() {
-  WiFi.mode(WIFI_STA);
-  WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
-  WiFi.onEvent(connectedToAP, ARDUINO_EVENT_WIFI_STA_CONNECTED);
-  WiFi.onEvent(disconnectedFromAP, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
-  WiFi.onEvent(gotIPFromAP, ARDUINO_EVENT_WIFI_STA_GOT_IP);
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to WiFi ..");
+  if(wifiSSID.isEmpty()) {
+    Serial.println("Missing wifiSSID from the config file");
+  } else {
+    WiFi.mode(WIFI_STA);
+    WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE, INADDR_NONE);
+    WiFi.onEvent(connectedToAP, ARDUINO_EVENT_WIFI_STA_CONNECTED);
+    WiFi.onEvent(disconnectedFromAP, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+    WiFi.onEvent(gotIPFromAP, ARDUINO_EVENT_WIFI_STA_GOT_IP);
+    WiFi.begin((char*)wifiSSID.c_str(), (char*)wifiPassword.c_str());
+    Serial.print("Connecting to WiFi ..");
+  }
 }
 
 void setup() {
@@ -239,14 +291,6 @@ void setup() {
 
 
   delay(2000);
-  initWiFi();
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  Serial.println("");
-  // timeClient.begin();
-
   // Setup SD Card
   while (!SD.begin()) {
     Serial.println("SD failed!");
@@ -255,20 +299,39 @@ void setup() {
   delay(2000);
   // Load old state
   readState();
+  readConfig();
+
+
+  initWiFi();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  // timeClient.begin();
+
   getAudioFiles();
 
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3);
 
-  ftpSrv.begin("grandfather", "clock");  //username, password for ftp.   (default 21, 50009 for PASV)
-
-
+  if(!ftpUsername.isEmpty() && !ftpPassword.isEmpty())
+    ftpSrv.begin(ftpUsername.c_str(), ftpPassword.c_str());  //username, wifiPassword for ftp.   (default 21, 50009 for PASV)
+  else
+    Serial.println("Missing ftpUsername or ftpPassword, not starting ftp server");
+    
   runner.init();
-  runner.addTask(sqsTask);
   runner.addTask(timeTask);
   runner.addTask(audioFileCheck);
   runner.addTask(requestRead);
   runner.addTask(ftpTask);
-  sqsTask.enableDelayed(6000);
+
+  if(!awsAccessKey.isEmpty() && !awsSecretKey.isEmpty() && !awsRegion.isEmpty()){
+    aws = new ESPAWSClient("sqs", awsAccessKey, awsSecretKey, awsRegion, "amazonaws.com");
+    runner.addTask(sqsTask);
+    sqsTask.enableDelayed(8000);
+  }else
+    Serial.println("Missing awsAccessKey or awsSecretKey or awsRegion, aws will nt be available.");
+
   timeTask.enableDelayed(10000);
   audioFileCheck.enableDelayed(10000);
   ftpTask.enable();
@@ -308,13 +371,13 @@ void runCuckoo() {
 
 void (*httpCallback)();
 void httpReady() {
-  if (aws.receiveReady()) {
+  if (aws->receiveReady()) {
     requestRead.disable();
     (*httpCallback)();
   }
 }
 void receiveMessageCallback() {
-  AWSResponse resp = aws.receive();
+  AWSResponse resp = aws->receive();
   Serial.println("AWS Response " + String(resp.status) + " - " + resp.body);
   if (resp.status == 200) {
     int startI;
@@ -336,10 +399,10 @@ void receiveMessageCallback() {
 
         String receiptHandle = resp.body.substring(startI + 15, endI);
         Serial.println("Deleting: " + receiptHandle);
-        aws.doGet("/xxxxxxxxxxx/ClockQueue.fifo", "Action=DeleteMessage&ReceiptHandle=" + urlEncode(receiptHandle));
-        while (!aws.receiveReady())
+        aws->doGet(sqsQueue, "Action=DeleteMessage&ReceiptHandle=" + urlEncode(receiptHandle));
+        while (!aws->receiveReady())
           ;
-        resp = aws.receive();
+        resp = aws->receive();
         Serial.println("AWS Response " + String(resp.status) + " - " + resp.body);
       }
 
@@ -415,8 +478,8 @@ void receiveMessageCallback() {
 void sqsCallback() {
   struct tm timeinfo;
   if (WiFi.status() == WL_CONNECTED && getLocalTime(&timeinfo)) {
-    Serial.println("GET /xxxxxxxxxxx/ClockQueue.fifo?Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
-    aws.doGet("/xxxxxxxxxxx/ClockQueue.fifo", "Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
+    Serial.println("GET "+sqsQueue+"?Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
+    aws->doGet(sqsQueue, "Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
     httpCallback = &receiveMessageCallback;
     requestRead.enable();
     sqsTask.disable();
@@ -426,7 +489,7 @@ void timeCallback() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
     Serial.println("Failed to obtain time");
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3);
     return;
   }
   // Check if an hour has passed

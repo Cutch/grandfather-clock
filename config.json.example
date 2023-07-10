@@ -1,0 +1,12 @@
+{
+    "wifiSSID":"xxxx-xxxxx",
+    "wifiPassword":"xxxxxxxxxxxxxxx",
+
+    "awsAccessKey": "xxxxxxxxxxxxxxxxxxxx",
+    "awsSecretKey": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "sqsQueue": "/000000000000/xxxxxxxxxx.fifo",
+    "awsRegion": "us-xxxx-1",
+
+    "ftpUsername": "grandfather",
+    "ftpPassword": "clock"
+}
