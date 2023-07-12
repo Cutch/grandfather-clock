@@ -84,6 +84,11 @@ String wifiPassword;
 String ftpUsername;
 String ftpPassword;
 
+int gearSpokes = 10;
+int slideHoles = 15;
+double maxSlidePercentage = 100;
+double shuffleSlidePercentage = 100;
+
 void writeState() {
   stateFile = SD.open(stateFilename, FILE_WRITE);
   if (stateFile) {
@@ -162,6 +167,13 @@ void readConfig() {
     Serial.println(ftpUsername);
     Serial.print("ftpPassword: ");
     Serial.println(ftpPassword);
+
+
+    
+    gearSpokes = doc["gearSpokes"].as<int>();
+    slideHoles = doc["slideHoles"].as<int>();
+    maxSlidePercentage = doc["maxSlidePercentage"].as<double>();
+    shuffleSlidePercentage = doc["shuffleSlidePercentage"].as<double>();
   }else{
     Serial.println("Missing config file in the SD card.");
   }
@@ -364,24 +376,26 @@ void setup() {
 void runCuckoo() {
   Serial.println("Cuckoo Time");
   stepper.enable();
+  double maxSlideRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*maxSlidePercentage;
+  double shuffleRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*shuffleSlidePercentage;
   delay(100);
-  stepper.rotate(450*(rotationDirection?1:-1));
+  stepper.rotate(maxSlideRotation*(rotationDirection?1:-1));
   writeState();
   playAudioFile();
   delay(500);
-  stepper.rotate(-90*(rotationDirection?1:-1));
+  stepper.rotate(-shuffleRotation*(rotationDirection?1:-1));
   writeState();
   delay(500);
-  stepper.rotate(90*(rotationDirection?1:-1));
+  stepper.rotate(shuffleRotation*(rotationDirection?1:-1));
   writeState();
   delay(500);
-  stepper.rotate(-90*(rotationDirection?1:-1));
+  stepper.rotate(-shuffleRotation*(rotationDirection?1:-1));
   writeState();
   delay(500);
-  stepper.rotate(90*(rotationDirection?1:-1));
+  stepper.rotate(shuffleRotation*(rotationDirection?1:-1));
   writeState();
   delay(500);
-  stepper.rotate(-450*(rotationDirection?1:-1));
+  stepper.rotate(-maxSlideRotation*(rotationDirection?1:-1));
   writeState();
   delay(100);
   Serial.println("End Cuckoo Time");
