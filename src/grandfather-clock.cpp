@@ -15,6 +15,8 @@
 #include <WiFiClientSecure.h>
 #include <ssl_client.h>
 #include <WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <AsyncElegantOTA.h>
 
 #include <SimpleFTPServer.h>
 
@@ -23,6 +25,7 @@ WiFiClientSecure client;
 HTTPClient http;
 // WiFiUDP ntpUDP;
 FtpServer ftpSrv;  //set #define FTP_DEBUG in ESP8266FtpServer.h to see ftp verbose on serial
+AsyncWebServer server(80);
 
 const char* ntpServer1 = "0.pool.ntp.org";
 const char* ntpServer2 = "1.pool.ntp.org";
@@ -366,7 +369,15 @@ void setup() {
   timeTask.enableDelayed(10000);
   audioFileCheck.enableDelayed(10000);
   ftpTask.enable();
+  
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    AsyncWebServerResponse *response = request->beginResponse(301, "text/plain", "Redirect");
+    response->addHeader("Location", "/update");
+    request->send(response);
+  });
 
+  AsyncElegantOTA.begin(&server);
+  server.begin();
 
   Serial.print("Starting Run Loop ");
   Serial.println(xPortGetCoreID());
@@ -376,8 +387,8 @@ void setup() {
 void runCuckoo() {
   Serial.println("Cuckoo Time");
   stepper.enable();
-  double maxSlideRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*maxSlidePercentage;
-  double shuffleRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*shuffleSlidePercentage;
+  double maxSlideRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*maxSlidePercentage/100;
+  double shuffleRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*shuffleSlidePercentage/100;
   delay(100);
   stepper.rotate(maxSlideRotation*(rotationDirection?1:-1));
   writeState();
