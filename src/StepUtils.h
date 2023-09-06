@@ -16,6 +16,7 @@ class Stepper {
         void disable();
         void rotate(int deg);
         bool resetToZeroStep();
+        void rotateByStep(int stepCount);
         int getStep();
         void setStep(int _step);
         void forceMove(int degrees);
@@ -24,6 +25,5 @@ class Stepper {
         int step; 
         void oneStep();
         int degToStep(int deg);
-        void rotateByStep(int stepCount);
 };
 #endif

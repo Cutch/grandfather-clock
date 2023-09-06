@@ -53,7 +53,13 @@ File configFile;
 
 String audioFileList[MAX_AUDIO_FILES];
 int lastHour = -1;
+int timeSkip = 0;
 #define LED_PIN 2
+#define USE_STOPPER true
+#if USE_STOPPER
+  #define STOPPER_OUT_PIN 16
+  #define STOPPER_PIN 17
+#endif
 #define SPDIF_OUT_PIN 27
 // #define SPI_SPEED SD_SCK_MHZ(40)
 
@@ -86,17 +92,20 @@ String wifiSSID;
 String wifiPassword;
 String ftpUsername;
 String ftpPassword;
-
+	
 int gearSpokes = 10;
 int slideHoles = 15;
 double maxSlidePercentage = 100;
 double shuffleSlidePercentage = 100;
+double maxVolume = 100;
 
 void writeState() {
   stateFile = SD.open(stateFilename, FILE_WRITE);
   if (stateFile) {
     StaticJsonDocument<256> writeDoc;
+#if !USE_STOPPER
     writeDoc["step"] = stepper.getStep();
+#endif
     writeDoc["volume"] = volume;
     writeDoc["enable"] = enable;
     writeDoc["selectedAudioFile"] = selectedAudioFile;
@@ -112,13 +121,15 @@ void readState() {
     stateFile = SD.open(stateFilename);
     deserializeJson(doc, stateFile);
     stateFile.close();
-    stepper.setStep(doc["step"].as<int>());
     volume = doc["volume"].as<int>();
     enable = doc["enable"].as<bool>();
     selectedAudioFile = doc["selectedAudioFile"].as<String>();
 
+#if !USE_STOPPER
+    stepper.setStep(doc["step"].as<int>());
     Serial.print("Step set to: ");
     Serial.println(stepper.getStep());
+#endif
     Serial.print("Volume set to: ");
     Serial.println(volume);
     Serial.print("Enable set to: ");
@@ -126,10 +137,14 @@ void readState() {
     Serial.print("SelectedAudioFile set to: ");
     Serial.println(selectedAudioFile);
 
+#if USE_STOPPER
+    resetPosition();
+#else
     if(stepper.resetToZeroStep()){
       writeState();
     }
-  }else{
+#endif
+  } else {
     Serial.print(stateFilename);
     Serial.println(" does not exist");
   }
@@ -177,6 +192,7 @@ void readConfig() {
     slideHoles = doc["slideHoles"].as<int>();
     maxSlidePercentage = doc["maxSlidePercentage"].as<double>();
     shuffleSlidePercentage = doc["shuffleSlidePercentage"].as<double>();
+    maxVolume = doc["maxVolume"].as<double>();
   }else{
     Serial.println("Missing config file in the SD card.");
   }
@@ -240,7 +256,7 @@ void audioPlaybackCallback(void* params) {
     // if(source->isOpen()) source->close();
     // Start
     if (!selectedAudioFile.isEmpty()) {
-      out->SetGain(((float)volume) / 250);
+      out->SetGain(((float)volume) / 250 * ((float)maxVolume) / 100);
       if (source->open(("/" + selectedAudioFile + ".wav").c_str())) {
         Serial.println("Playing " + selectedAudioFile + " volume: " + String(volume));
         decoder->begin(source, out);
@@ -264,6 +280,7 @@ void audioPlaybackCallback(void* params) {
     vTaskDelete(NULL);
   } catch (...) {
     Serial.println("Audio Play Crash");
+    blink(2, true);
     vTaskDelete(NULL);
   }
 }
@@ -299,6 +316,18 @@ void gotIPFromAP(WiFiEvent_t wifi_event, WiFiEventInfo_t wifi_info) {
   Serial.println(WiFi.localIP());
 }
 
+#if USE_STOPPER
+  #define STEPS_BEFORE_CHECK 1
+  bool isTouching() {
+    return digitalRead(STOPPER_PIN) == HIGH;
+  }
+  void resetPosition(){
+    while(!isTouching()){
+      stepper.rotateByStep(-STEPS_BEFORE_CHECK*(rotationDirection?1:-1));
+    }
+  }
+#endif
+
 void initWiFi() {
   if(wifiSSID.isEmpty()) {
     Serial.println("Missing wifiSSID from the config file");
@@ -319,6 +348,14 @@ void setup() {
   stepper.initialize();
   // Audio should be before SD
   setupAudio();
+
+#if USE_STOPPER
+  pinMode(STOPPER_OUT_PIN, OUTPUT);
+  digitalWrite(STOPPER_OUT_PIN, HIGH);
+  pinMode(STOPPER_PIN, INPUT_PULLUP);
+#endif
+
+
 
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
@@ -386,31 +423,51 @@ void setup() {
 
 void runCuckoo() {
   Serial.println("Cuckoo Time");
+  timeTask.disable();
+  audioFileCheck.disable();
+  ftpTask.disable();
   stepper.enable();
   double maxSlideRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*maxSlidePercentage/100;
   double shuffleRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*shuffleSlidePercentage/100;
   delay(100);
   stepper.rotate(maxSlideRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
   writeState();
+#endif
   playAudioFile();
   delay(500);
   stepper.rotate(-shuffleRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
   writeState();
+#endif
   delay(500);
   stepper.rotate(shuffleRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
   writeState();
+#endif
   delay(500);
   stepper.rotate(-shuffleRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
   writeState();
+#endif
   delay(500);
   stepper.rotate(shuffleRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
   writeState();
+#endif
   delay(500);
+#if USE_STOPPER
+  resetPosition();
+#else
   stepper.rotate(-maxSlideRotation*(rotationDirection?1:-1));
   writeState();
+#endif
   delay(100);
   Serial.println("End Cuckoo Time");
   stepper.disable();
+  timeTask.enable();
+  audioFileCheck.enable();
+  ftpTask.enable();
 }
 
 void (*httpCallback)();
@@ -532,17 +589,24 @@ void sqsCallback() {
 void timeCallback() {
   struct tm timeinfo;
   if (!getLocalTime(&timeinfo)) {
-    Serial.println("Failed to obtain time");
-    blink(3, true);
-    configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3);
+    if(timeSkip == 0){
+      Serial.println("Failed to obtain time");
+      blink(3, true);
+      configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3);
+    }
+    timeSkip = (timeSkip + 1) % 6; // Every 60s
+
     return;
   }
   // Check if an hour has passed
   if (enable && timeinfo.tm_min == 0 && lastHour != timeinfo.tm_hour) {
     lastHour = timeinfo.tm_hour;
+    sqsTask.disable();
     runCuckoo();
+    sqsTask.enable();
   }
 }
+
 void ftpCallback(){
   ftpSrv.handleFTP();
 }

@@ -14,5 +14,6 @@
     "gearSpokes": 10,
     "slideHoles": 15,
     "maxSlidePercentage": 100,
-    "shuffleSlidePercentage": 25
+    "shuffleSlidePercentage": 25,
+    "maxVolume": 60
 }
