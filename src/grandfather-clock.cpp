@@ -69,10 +69,10 @@ int timeSkip = 0;
 #define LED_PIN 2
 #define USE_STOPPER true
 #if USE_STOPPER
-  #define STOPPER_OUT_PIN 16
-  #define STOPPER_PIN 17
+  #define STOPPER_OUT_PIN 25
+  #define STOPPER_PIN 26
 #endif
-#define SPDIF_OUT_PIN 27
+// #define SPDIF_OUT_PIN 27
 // #define SPI_SPEED SD_SCK_MHZ(40)
 
 AudioFileSourceSD* source;
@@ -458,7 +458,7 @@ void setup() {
   // Setup SD Card
   while (!SD.begin()) {
     Serial.println("SD failed!");
-    delay(1000);
+    blink(4, true);
   }
   delay(2000);
   // Load old state
