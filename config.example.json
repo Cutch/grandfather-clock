@@ -15,5 +15,10 @@
     "slideHoles": 15,
     "maxSlidePercentage": 100,
     "shuffleSlidePercentage": 25,
-    "maxVolume": 60
+    "maxVolume": 60,
+
+    "useAudio": true,
+    
+    "startHour": 10,
+    "endHour": 20
 }

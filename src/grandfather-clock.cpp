@@ -17,9 +17,18 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <AsyncElegantOTA.h>
+#include <AsyncTCP.h>
 
 #include <SimpleFTPServer.h>
+#include <WebSerial.h>
 
+#ifdef ESP32
+  #include "driver/i2s.h"
+#elif defined(ARDUINO_ARCH_RP2040) || ARDUINO_ESP8266_MAJOR >= 3
+  #include <I2S.h>
+#elif ARDUINO_ESP8266_MAJOR < 3
+  #include <i2s.h>
+#endif
 // #include <WiFiUDP.h>
 WiFiClientSecure client;
 HTTPClient http;
@@ -43,6 +52,7 @@ Stepper stepper = Stepper();
 // States
 int volume = 50;
 bool enable = true;
+bool useAudio = true;
 String selectedAudioFile;
 // End States
 
@@ -52,6 +62,8 @@ File configFile;
 #define MAX_AUDIO_FILES 256
 
 String audioFileList[MAX_AUDIO_FILES];
+int startHour = 10;
+int endHour = 20;
 int lastHour = -1;
 int timeSkip = 0;
 #define LED_PIN 2
@@ -83,6 +95,28 @@ Task audioFileCheck(30000, TASK_FOREVER, &getAudioFiles);
 Task requestRead(50, TASK_FOREVER, &httpReady);
 Task ftpTask(0, TASK_FOREVER, &ftpCallback);
 // End Scheduler
+
+#if USE_STOPPER
+  #define STEPS_BEFORE_CHECK 1
+  bool isTouching() {
+    return digitalRead(STOPPER_PIN) == HIGH;
+  }
+  void resetPosition(){
+    int counter = 0;
+    Serial.print("Retracting");
+    WebSerial.print("Retracting");
+    while(!isTouching()){
+      stepper.rotateByStep(-STEPS_BEFORE_CHECK*(rotationDirection?1:-1));
+      counter++;
+      if(counter % 100 == 0){
+        Serial.print(".");
+        WebSerial.print(".");
+      }
+    }
+    Serial.println("");
+    WebSerial.println("");
+  }
+#endif
 
 String awsAccessKey;
 String awsSecretKey;
@@ -186,8 +220,11 @@ void readConfig() {
     Serial.print("ftpPassword: ");
     Serial.println(ftpPassword);
 
-
+    useAudio = doc["useAudio"].as<bool>();
     
+    startHour = doc["startHour"].as<int>();
+    endHour = doc["endHour"].as<int>();
+
     gearSpokes = doc["gearSpokes"].as<int>();
     slideHoles = doc["slideHoles"].as<int>();
     maxSlidePercentage = doc["maxSlidePercentage"].as<double>();
@@ -250,6 +287,7 @@ TaskHandle_t audioPlaybackHandle;
 void audioPlaybackCallback(void* params) {
   try {
     if (out == NULL) setAudioOutput();
+    i2s_set_dac_mode(I2S_DAC_CHANNEL_BOTH_EN);
     // Close old run
     // decoder = new AudioGeneratorWAV();
     // if (decoder != NULL && decoder->isRunning()) decoder->stop();
@@ -259,17 +297,21 @@ void audioPlaybackCallback(void* params) {
       out->SetGain(((float)volume) / 250 * ((float)maxVolume) / 100);
       if (source->open(("/" + selectedAudioFile + ".wav").c_str())) {
         Serial.println("Playing " + selectedAudioFile + " volume: " + String(volume));
+        WebSerial.println("Playing " + selectedAudioFile + " volume: " + String(volume));
         decoder->begin(source, out);
         while (decoder->isRunning()) {
           if (!decoder->loop()) {
-            out->SetGain(0);
+            // out->SetGain(0);
             out->flush();
             decoder->stop();
             out->stop();
-            out = NULL;
+            i2s_set_dac_mode(I2S_DAC_CHANNEL_DISABLE);
+            // delete out;
+            // out = NULL;
           }
         }
         Serial.println("Audio done");
+        WebSerial.println("Audio done");
       } else {
         Serial.println("Audio file not found: " + selectedAudioFile);
       }
@@ -280,6 +322,7 @@ void audioPlaybackCallback(void* params) {
     vTaskDelete(NULL);
   } catch (...) {
     Serial.println("Audio Play Crash");
+    WebSerial.println("Audio Play Crash");
     blink(2, true);
     vTaskDelete(NULL);
   }
@@ -288,9 +331,11 @@ void audioPlaybackCallback(void* params) {
 void playAudioFile() {
   if (decoder->isRunning()) {
     Serial.println("Reset Seek");
+    WebSerial.println("Reset Seek");
     source->seek(0, SEEK_SET);
   } else {
-    Serial.println("Create Task");
+    Serial.println("Create Audio Task");
+    WebSerial.println("Create Audio Task");
     xTaskCreatePinnedToCore(
       audioPlaybackCallback, /* Function to implement the task */
       "AudioPlayback",       /* Name of the task */
@@ -316,18 +361,6 @@ void gotIPFromAP(WiFiEvent_t wifi_event, WiFiEventInfo_t wifi_info) {
   Serial.println(WiFi.localIP());
 }
 
-#if USE_STOPPER
-  #define STEPS_BEFORE_CHECK 1
-  bool isTouching() {
-    return digitalRead(STOPPER_PIN) == HIGH;
-  }
-  void resetPosition(){
-    while(!isTouching()){
-      stepper.rotateByStep(-STEPS_BEFORE_CHECK*(rotationDirection?1:-1));
-    }
-  }
-#endif
-
 void initWiFi() {
   if(wifiSSID.isEmpty()) {
     Serial.println("Missing wifiSSID from the config file");
@@ -340,6 +373,68 @@ void initWiFi() {
     WiFi.begin((char*)wifiSSID.c_str(), (char*)wifiPassword.c_str());
     Serial.print("Connecting to WiFi ..");
   }
+}
+
+void runCuckoo() {
+  Serial.println("Cuckoo Time");
+  WebSerial.println("Cuckoo Time");
+  timeTask.disable();
+  audioFileCheck.disable();
+  ftpTask.disable();
+  stepper.enable();
+  double maxSlideRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*maxSlidePercentage/100;
+  double shuffleRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*shuffleSlidePercentage/100;
+  delay(100);
+  stepper.rotate(maxSlideRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
+  writeState();
+#endif
+  if(useAudio) {
+    playAudioFile();
+  }
+  delay(500);
+  stepper.rotate(-shuffleRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
+  writeState();
+#endif
+  delay(500);
+  stepper.rotate(shuffleRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
+  writeState();
+#endif
+  delay(500);
+  stepper.rotate(-shuffleRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
+  writeState();
+#endif
+  delay(500);
+  stepper.rotate(shuffleRotation*(rotationDirection?1:-1));
+#if !USE_STOPPER
+  writeState();
+#endif
+  delay(500);
+#if USE_STOPPER
+  resetPosition();
+#else
+  stepper.rotate(-maxSlideRotation*(rotationDirection?1:-1));
+  writeState();
+#endif
+  delay(100);
+  Serial.println("End Cuckoo Time");
+  WebSerial.println("End Cuckoo Time");
+  stepper.disable();
+  timeTask.enable();
+  audioFileCheck.enable();
+  ftpTask.enable();
+}
+
+void recvMsg(uint8_t *data, size_t len){
+  WebSerial.println("Received Data...");
+  String d = "";
+  for(int i=0; i < len; i++){
+    d += char(data[i]);
+  }
+  WebSerial.println(d);
 }
 
 void setup() {
@@ -401,74 +496,45 @@ void setup() {
     runner.addTask(sqsTask);
     sqsTask.enableDelayed(8000);
   }else
-    Serial.println("Missing awsAccessKey or awsSecretKey or awsRegion, aws will nt be available.");
+    Serial.println("Missing awsAccessKey or awsSecretKey or awsRegion, aws will not be available.");
 
   timeTask.enableDelayed(10000);
   audioFileCheck.enableDelayed(10000);
   ftpTask.enable();
   
+
+  AsyncElegantOTA.begin(&server);
+  // WebSerial is accessible at "<IP Address>/webserial" in browser
+  WebSerial.begin(&server);
+  /* Attach Message Callback */
+  WebSerial.msgCallback(recvMsg);
+  server.begin();
+
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
     AsyncWebServerResponse *response = request->beginResponse(301, "text/plain", "Redirect");
     response->addHeader("Location", "/update");
     request->send(response);
   });
+  server.on("/restart", HTTP_POST, [](AsyncWebServerRequest *request) {
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "Done");
+    request->send(response);
 
-  AsyncElegantOTA.begin(&server);
-  server.begin();
+    delay(1000);
+    ESP.restart();
+  });
 
-  Serial.print("Starting Run Loop ");
-  Serial.println(xPortGetCoreID());
+  server.on("/run", HTTP_POST, [](AsyncWebServerRequest *request) {
+    AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "Done");
+    request->send(response);
+
+    delay(1000);
+    runCuckoo();
+  });
+  
+  Serial.print("Starting Run Loop");
+  WebSerial.println("Starting Run Loop");
 }
 
-
-void runCuckoo() {
-  Serial.println("Cuckoo Time");
-  timeTask.disable();
-  audioFileCheck.disable();
-  ftpTask.disable();
-  stepper.enable();
-  double maxSlideRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*maxSlidePercentage/100;
-  double shuffleRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*shuffleSlidePercentage/100;
-  delay(100);
-  stepper.rotate(maxSlideRotation*(rotationDirection?1:-1));
-#if !USE_STOPPER
-  writeState();
-#endif
-  playAudioFile();
-  delay(500);
-  stepper.rotate(-shuffleRotation*(rotationDirection?1:-1));
-#if !USE_STOPPER
-  writeState();
-#endif
-  delay(500);
-  stepper.rotate(shuffleRotation*(rotationDirection?1:-1));
-#if !USE_STOPPER
-  writeState();
-#endif
-  delay(500);
-  stepper.rotate(-shuffleRotation*(rotationDirection?1:-1));
-#if !USE_STOPPER
-  writeState();
-#endif
-  delay(500);
-  stepper.rotate(shuffleRotation*(rotationDirection?1:-1));
-#if !USE_STOPPER
-  writeState();
-#endif
-  delay(500);
-#if USE_STOPPER
-  resetPosition();
-#else
-  stepper.rotate(-maxSlideRotation*(rotationDirection?1:-1));
-  writeState();
-#endif
-  delay(100);
-  Serial.println("End Cuckoo Time");
-  stepper.disable();
-  timeTask.enable();
-  audioFileCheck.enable();
-  ftpTask.enable();
-}
 
 void (*httpCallback)();
 void httpReady() {
@@ -480,6 +546,7 @@ void httpReady() {
 void receiveMessageCallback() {
   AWSResponse resp = aws->receive();
   Serial.println("AWS Response " + String(resp.status) + " - " + resp.body);
+  WebSerial.println("AWS Response " + String(resp.status) + " - " + resp.body);
   if (resp.status == 200) {
     int startI;
     int endI;
@@ -489,6 +556,7 @@ void receiveMessageCallback() {
       String responseBody = resp.body.substring(startI + 6, endI);
       responseBody.replace("&quot;", "\"");
       Serial.println(responseBody);
+      WebSerial.println(responseBody);
       DynamicJsonDocument doc(2048);
       deserializeJson(doc, responseBody);
 
@@ -500,11 +568,13 @@ void receiveMessageCallback() {
 
         String receiptHandle = resp.body.substring(startI + 15, endI);
         Serial.println("Deleting: " + receiptHandle);
+        WebSerial.println("Deleting: " + receiptHandle);
         aws->doGet(sqsQueue, "Action=DeleteMessage&ReceiptHandle=" + urlEncode(receiptHandle));
         while (!aws->receiveReady())
           ;
         resp = aws->receive();
         Serial.println("AWS Response " + String(resp.status) + " - " + resp.body);
+        WebSerial.println("AWS Response " + String(resp.status) + " - " + resp.body);
       }
 
       // Do body
@@ -525,7 +595,6 @@ void receiveMessageCallback() {
       }
       if (!doc["sound"].isNull()) {
         String str = doc["sound"].as<String>();
-        str.toLowerCase();
         if (str == "next") {
           int i = 0;
           for (; i < MAX_AUDIO_FILES; i++) {
@@ -575,11 +644,26 @@ void receiveMessageCallback() {
     sqsTask.enableDelayed(10000);
   }
 }
+bool isValidTime() {
+  struct tm time;
+  getLocalTime(&time);
+
+  struct tm startTime;
+  getLocalTime(&startTime);
+  startTime.tm_hour = startHour;
+
+  struct tm endTime;
+  getLocalTime(&endTime);
+  endTime.tm_hour = endHour;
+
+  return difftime(mktime(&endTime), mktime(&time)) >= 0 && difftime(mktime(&time), mktime(&startTime)) >= 0;
+}
 
 void sqsCallback() {
   struct tm timeinfo;
   if (WiFi.status() == WL_CONNECTED && getLocalTime(&timeinfo)) {
     Serial.println("GET "+sqsQueue+"?Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
+    WebSerial.println("GET "+sqsQueue+"?Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
     aws->doGet(sqsQueue, "Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
     httpCallback = &receiveMessageCallback;
     requestRead.enable();
@@ -591,6 +675,7 @@ void timeCallback() {
   if (!getLocalTime(&timeinfo)) {
     if(timeSkip == 0){
       Serial.println("Failed to obtain time");
+      WebSerial.println("Failed to obtain time");
       blink(3, true);
       configTime(gmtOffset_sec, daylightOffset_sec, ntpServer1, ntpServer2, ntpServer3);
     }
@@ -601,9 +686,14 @@ void timeCallback() {
   // Check if an hour has passed
   if (enable && timeinfo.tm_min == 0 && lastHour != timeinfo.tm_hour) {
     lastHour = timeinfo.tm_hour;
-    sqsTask.disable();
-    runCuckoo();
-    sqsTask.enable();
+    if(isValidTime()){
+      sqsTask.disable();
+      runCuckoo();
+      sqsTask.enable();
+    }else{
+      Serial.println("Off Schedule");
+      WebSerial.println("Off Schedule");
+    }
   }
 }
 
