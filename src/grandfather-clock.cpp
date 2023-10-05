@@ -66,11 +66,11 @@ int startHour = 10;
 int endHour = 20;
 int lastHour = -1;
 int timeSkip = 0;
+int manualRun = false;
 #define LED_PIN 2
 #define USE_STOPPER true
 #if USE_STOPPER
-  #define STOPPER_OUT_PIN 25
-  #define STOPPER_PIN 26
+  #define STOPPER_PIN 27
 #endif
 // #define SPDIF_OUT_PIN 27
 // #define SPI_SPEED SD_SCK_MHZ(40)
@@ -99,22 +99,22 @@ Task ftpTask(0, TASK_FOREVER, &ftpCallback);
 #if USE_STOPPER
   #define STEPS_BEFORE_CHECK 1
   bool isTouching() {
-    return digitalRead(STOPPER_PIN) == HIGH;
+    return digitalRead(STOPPER_PIN) == LOW;
   }
   void resetPosition(){
     int counter = 0;
     Serial.print("Retracting");
-    WebSerial.print("Retracting");
+    // WebSerial.print("Retracting");
     while(!isTouching()){
       stepper.rotateByStep(-STEPS_BEFORE_CHECK*(rotationDirection?1:-1));
       counter++;
       if(counter % 100 == 0){
         Serial.print(".");
-        WebSerial.print(".");
+        // WebSerial.print(".");
       }
     }
     Serial.println("");
-    WebSerial.println("");
+    // WebSerial.println("");
   }
 #endif
 
@@ -445,8 +445,6 @@ void setup() {
   setupAudio();
 
 #if USE_STOPPER
-  pinMode(STOPPER_OUT_PIN, OUTPUT);
-  digitalWrite(STOPPER_OUT_PIN, HIGH);
   pinMode(STOPPER_PIN, INPUT_PULLUP);
 #endif
 
@@ -526,9 +524,7 @@ void setup() {
   server.on("/run", HTTP_POST, [](AsyncWebServerRequest *request) {
     AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "Done");
     request->send(response);
-
-    delay(1000);
-    runCuckoo();
+    manualRun = true;
   });
   
   Serial.print("Starting Run Loop");
@@ -638,6 +634,10 @@ void receiveMessageCallback() {
           Serial.println("Disabled");
       }
       writeState();
+    }
+    if (manualRun) {
+      manualRun = false;
+      runCuckoo();
     }
     sqsTask.enable();
   } else {

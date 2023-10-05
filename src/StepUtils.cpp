@@ -1,4 +1,5 @@
 #include "StepUtils.h"
+#define FAKE_SPIN true
 
 Stepper::Stepper(){
 
@@ -11,15 +12,17 @@ void Stepper::setStep(int _step){
 }
 
 void Stepper::oneStep() {
-  digitalWrite(DIRECTION_PIN, direction ? HIGH : LOW);
-  digitalWrite(STEP_PIN, HIGH);
-  if (direction) {
-    step++;
-  } else {
-    step--;
-  }
-  delay(PIN_SPEED);
-  digitalWrite(STEP_PIN, LOW);
+  #if !FAKE_SPIN
+    digitalWrite(DIRECTION_PIN, direction ? HIGH : LOW);
+    digitalWrite(STEP_PIN, HIGH);
+    if (direction) {
+      step++;
+    } else {
+      step--;
+    }
+    delay(PIN_SPEED);
+    digitalWrite(STEP_PIN, LOW);
+  #endif
   delay(PIN_SPEED);
 }
 
