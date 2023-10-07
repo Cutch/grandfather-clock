@@ -72,6 +72,9 @@ int manualRun = false;
 #if USE_STOPPER
   #define STOPPER_PIN 27
 #endif
+#define I2S_BCLK_PIN 26
+#define I2S_WCLK_PIN 25
+#define I2S_DOUT_PIN 22
 // #define SPDIF_OUT_PIN 27
 // #define SPI_SPEED SD_SCK_MHZ(40)
 
@@ -127,11 +130,10 @@ String wifiPassword;
 String ftpUsername;
 String ftpPassword;
 	
-int gearSpokes = 10;
-int slideHoles = 15;
-double maxSlidePercentage = 100;
-double shuffleSlidePercentage = 100;
-double maxVolume = 100;
+// int slideHoles = 15;
+double maxRotation = 360;
+double shufflePercentage = 20;
+double maxVolume = 50;
 
 void writeState() {
   stateFile = SD.open(stateFilename, FILE_WRITE);
@@ -225,10 +227,8 @@ void readConfig() {
     startHour = doc["startHour"].as<int>();
     endHour = doc["endHour"].as<int>();
 
-    gearSpokes = doc["gearSpokes"].as<int>();
-    slideHoles = doc["slideHoles"].as<int>();
-    maxSlidePercentage = doc["maxSlidePercentage"].as<double>();
-    shuffleSlidePercentage = doc["shuffleSlidePercentage"].as<double>();
+    maxRotation = doc["maxRotation"].as<double>();
+    shufflePercentage = doc["shufflePercentage"].as<double>();
     maxVolume = doc["maxVolume"].as<double>();
   }else{
     Serial.println("Missing config file in the SD card.");
@@ -238,7 +238,7 @@ void readConfig() {
 void setAudioOutput() {
   out = new AudioOutputI2S(0, 1);
   out->SetGain(0);
-  out->SetPinout(26, 25, 22);
+  out->SetPinout(I2S_BCLK_PIN, I2S_WCLK_PIN, I2S_DOUT_PIN);
 }
 void setupAudio() {
   Serial.println("Audio Setup");
@@ -382,10 +382,9 @@ void runCuckoo() {
   audioFileCheck.disable();
   ftpTask.disable();
   stepper.enable();
-  double maxSlideRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*maxSlidePercentage/100;
-  double shuffleRotation = (((double)slideHoles-1)/(double)gearSpokes)*360*shuffleSlidePercentage/100;
+  double shuffleRotation = maxRotation*shufflePercentage/100;
   delay(100);
-  stepper.rotate(maxSlideRotation*(rotationDirection?1:-1));
+  stepper.rotate(maxRotation*(rotationDirection?1:-1));
 #if !USE_STOPPER
   writeState();
 #endif
@@ -416,7 +415,7 @@ void runCuckoo() {
 #if USE_STOPPER
   resetPosition();
 #else
-  stepper.rotate(-maxSlideRotation*(rotationDirection?1:-1));
+  stepper.rotate(-maxRotation*(rotationDirection?1:-1));
   writeState();
 #endif
   delay(100);
