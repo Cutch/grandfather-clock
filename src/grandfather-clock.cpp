@@ -381,9 +381,10 @@ void runCuckoo() {
   timeTask.disable();
   audioFileCheck.disable();
   ftpTask.disable();
-  stepper.enable();
   double shuffleRotation = maxRotation*shufflePercentage/100;
   delay(100);
+  WebSerial.println("maxRotation step count " + String(maxRotation) + " = " + String(stepper.degToStep(maxRotation)));
+  WebSerial.println("shuffleRotation step count " +String(shuffleRotation) + " = " + String(stepper.degToStep(shuffleRotation)));
   stepper.rotate(maxRotation*(rotationDirection?1:-1));
 #if !USE_STOPPER
   writeState();
@@ -421,7 +422,6 @@ void runCuckoo() {
   delay(100);
   Serial.println("End Cuckoo Time");
   WebSerial.println("End Cuckoo Time");
-  stepper.disable();
   timeTask.enable();
   audioFileCheck.enable();
   ftpTask.enable();
@@ -540,8 +540,8 @@ void httpReady() {
 }
 void receiveMessageCallback() {
   AWSResponse resp = aws->receive();
-  Serial.println("AWS Response " + String(resp.status) + " - " + resp.body);
-  WebSerial.println("AWS Response " + String(resp.status) + " - " + resp.body);
+  Serial.println("Tick AWS Response " + String(resp.status));
+  WebSerial.println("Tick AWS Response " + String(resp.status));
   if (resp.status == 200) {
     int startI;
     int endI;
@@ -568,8 +568,6 @@ void receiveMessageCallback() {
         while (!aws->receiveReady())
           ;
         resp = aws->receive();
-        Serial.println("AWS Response " + String(resp.status) + " - " + resp.body);
-        WebSerial.println("AWS Response " + String(resp.status) + " - " + resp.body);
       }
 
       // Do body

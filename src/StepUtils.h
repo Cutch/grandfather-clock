@@ -6,7 +6,8 @@
 #define DIRECTION_PIN 0
 #define STEPPER_ENABLED_PIN 15
 #define PIN_SPEED 2
-
+#define TOOTH_COUNT 200
+#define FAKE_SPIN false
 
 class Stepper {
     public:
@@ -20,10 +21,11 @@ class Stepper {
         int getStep();
         void setStep(int _step);
         void forceMove(int degrees);
+        int degToStep(int deg);
     protected:
         int direction;
         int step; 
+        int enabled; 
         void oneStep();
-        int degToStep(int deg);
 };
 #endif

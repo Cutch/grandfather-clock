@@ -1,5 +1,4 @@
 #include "StepUtils.h"
-#define FAKE_SPIN true
 
 Stepper::Stepper(){
 
@@ -27,16 +26,18 @@ void Stepper::oneStep() {
 }
 
 int Stepper::degToStep(int deg) {
-  return ceil(360 / 200 * deg);
+  return (int)ceil((double)TOOTH_COUNT / 360.0 * (double)deg);
 }
 
 
 void Stepper::rotateByStep(int stepCount) {
+  enable();
   direction = stepCount >= 0 ? 1 : 0;
   if (stepCount < 0) stepCount = abs(stepCount);
   for (int i = 0; i < stepCount; i++) {
     oneStep();
   }
+  disable();
 }
 
 void Stepper::rotate(int deg) {
@@ -64,15 +65,22 @@ void Stepper::initialize(){
   pinMode(STEP_PIN, OUTPUT);
   pinMode(DIRECTION_PIN, OUTPUT);
   pinMode(STEPPER_ENABLED_PIN, OUTPUT);
-  digitalWrite(STEP_PIN, LOW);
-  digitalWrite(DIRECTION_PIN, LOW);
-  digitalWrite(STEPPER_ENABLED_PIN, HIGH);
+  enabled = true;
+  disable();
 }
 void Stepper::enable(){
-  digitalWrite(STEPPER_ENABLED_PIN, LOW);
+  if(!enabled){
+    enabled = true;
+    digitalWrite(STEPPER_ENABLED_PIN, LOW);
+    delay(PIN_SPEED);
+  }
 }
 void Stepper::disable(){
-  digitalWrite(STEP_PIN, LOW);
-  digitalWrite(DIRECTION_PIN, LOW);
-  digitalWrite(STEPPER_ENABLED_PIN, HIGH);
+  if(enabled){
+    enabled = false;
+    digitalWrite(STEP_PIN, LOW);
+    digitalWrite(DIRECTION_PIN, LOW);
+    digitalWrite(STEPPER_ENABLED_PIN, HIGH);
+    delay(PIN_SPEED);
+  }
 }
