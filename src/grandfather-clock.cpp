@@ -173,13 +173,16 @@ void readState() {
     Serial.print("SelectedAudioFile set to: ");
     Serial.println(selectedAudioFile);
 
+    stepper.disable();
 #if USE_STOPPER
+    stepper.disable();
     resetPosition();
 #else
     if(stepper.resetToZeroStep()){
       writeState();
     }
 #endif
+    stepper.enable();
   } else {
     Serial.print(stateFilename);
     Serial.println(" does not exist");
@@ -381,10 +384,9 @@ void runCuckoo() {
   timeTask.disable();
   audioFileCheck.disable();
   ftpTask.disable();
+  stepper.enable();
   double shuffleRotation = maxRotation*shufflePercentage/100;
   delay(100);
-  WebSerial.println("maxRotation step count " + String(maxRotation) + " = " + String(stepper.degToStep(maxRotation)));
-  WebSerial.println("shuffleRotation step count " +String(shuffleRotation) + " = " + String(stepper.degToStep(shuffleRotation)));
   stepper.rotate(maxRotation*(rotationDirection?1:-1));
 #if !USE_STOPPER
   writeState();
@@ -422,6 +424,7 @@ void runCuckoo() {
   delay(100);
   Serial.println("End Cuckoo Time");
   WebSerial.println("End Cuckoo Time");
+  stepper.disable();
   timeTask.enable();
   audioFileCheck.enable();
   ftpTask.enable();

@@ -18,6 +18,7 @@ class Stepper {
         void rotate(int deg);
         bool resetToZeroStep();
         void rotateByStep(int stepCount);
+        void rotateByStep(int stepCount, int pinSpeed);
         int getStep();
         void setStep(int _step);
         void forceMove(int degrees);
@@ -26,6 +27,6 @@ class Stepper {
         int direction;
         int step; 
         int enabled; 
-        void oneStep();
+        void oneStep(int pinSpeed);
 };
 #endif
