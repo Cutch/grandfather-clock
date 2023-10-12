@@ -173,16 +173,15 @@ void readState() {
     Serial.print("SelectedAudioFile set to: ");
     Serial.println(selectedAudioFile);
 
-    stepper.disable();
+    stepper.enable();
 #if USE_STOPPER
-    stepper.disable();
     resetPosition();
 #else
     if(stepper.resetToZeroStep()){
       writeState();
     }
 #endif
-    stepper.enable();
+    stepper.disable();
   } else {
     Serial.print(stateFilename);
     Serial.println(" does not exist");

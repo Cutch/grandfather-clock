@@ -19,10 +19,10 @@ void Stepper::oneStep(int pinSpeed) {
     } else {
       step--;
     }
-    delay(pinSpeed);
+    delayMicroseconds(pinSpeed);
     digitalWrite(STEP_PIN, LOW);
   #endif
-  delay(pinSpeed);
+  delayMicroseconds(pinSpeed);
 }
 
 int Stepper::degToStep(int deg) {
@@ -30,11 +30,7 @@ int Stepper::degToStep(int deg) {
 }
 
 void Stepper::rotateByStep(int stepCount) {
-  direction = stepCount >= 0 ? 1 : 0;
-  if (stepCount < 0) stepCount = abs(stepCount);
-  for (int i = 0; i < stepCount; i++) {
-    oneStep(PIN_SPEED);
-  }
+  rotateByStep(stepCount, PIN_SPEED);
 }
 
 void Stepper::rotateByStep(int stepCount, int pinSpeed) {
@@ -73,7 +69,7 @@ void Stepper::enable(){
   if(!enabled){
     enabled = true;
     digitalWrite(STEPPER_ENABLED_PIN, LOW);
-    delay(PIN_SPEED);
+    delayMicroseconds(PIN_SPEED);
   }
 }
 void Stepper::disable(){
@@ -82,6 +78,6 @@ void Stepper::disable(){
     digitalWrite(STEP_PIN, LOW);
     digitalWrite(DIRECTION_PIN, LOW);
     digitalWrite(STEPPER_ENABLED_PIN, HIGH);
-    delay(PIN_SPEED);
+    delayMicroseconds(PIN_SPEED);
   }
 }
