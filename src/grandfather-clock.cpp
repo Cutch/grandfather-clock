@@ -29,10 +29,7 @@
 #elif ARDUINO_ESP8266_MAJOR < 3
   #include <i2s.h>
 #endif
-// #include <WiFiUDP.h>
-WiFiClientSecure client;
-HTTPClient http;
-// WiFiUDP ntpUDP;
+
 FtpServer ftpSrv;  //set #define FTP_DEBUG in ESP8266FtpServer.h to see ftp verbose on serial
 AsyncWebServer server(80);
 
@@ -92,7 +89,7 @@ void timeCallback();
 void getAudioFiles();
 void httpReady();
 void ftpCallback();
-Task sqsTask(21000, TASK_FOREVER, &sqsCallback);
+Task sqsTask(31000, TASK_FOREVER, &sqsCallback);
 Task timeTask(10000, TASK_FOREVER, &timeCallback);
 Task audioFileCheck(30000, TASK_FOREVER, &getAudioFiles);
 Task requestRead(50, TASK_FOREVER, &httpReady);
@@ -541,6 +538,7 @@ void httpReady() {
   }
 }
 void receiveMessageCallback() {
+  if(!sqsTask.isEnabled()) return;
   AWSResponse resp = aws->receive();
   Serial.println("Tick AWS Response " + String(resp.status));
   WebSerial.println("Tick AWS Response " + String(resp.status));
@@ -640,7 +638,16 @@ void receiveMessageCallback() {
     }
     sqsTask.enable();
   } else {
-    sqsTask.enableDelayed(10000);
+    if (resp.status == 500){
+      Serial.println("Error Response " + String(resp.body));
+      WebSerial.println("Error Response " + String(resp.body));
+
+      if(resp.body.equals("Connection failure")){
+        delay(1000);
+        ESP.restart();
+      }
+    }
+    sqsTask.enableDelayed(30000);
   }
 }
 bool isValidTime() {
@@ -655,14 +662,16 @@ bool isValidTime() {
   getLocalTime(&endTime);
   endTime.tm_hour = endHour;
 
+  WebSerial.println("Time " + String(asctime(&startTime)) + " - "  +String(asctime(&time)) + " - " + String(asctime(&endTime)));
+  WebSerial.println("Time Diff " + String(difftime(mktime(&endTime), mktime(&time))) + " - "  +String(difftime(mktime(&time), mktime(&startTime))));
+
   return difftime(mktime(&endTime), mktime(&time)) >= 0 && difftime(mktime(&time), mktime(&startTime)) >= 0;
 }
 
 void sqsCallback() {
   struct tm timeinfo;
+  
   if (WiFi.status() == WL_CONNECTED && getLocalTime(&timeinfo)) {
-    Serial.println("GET "+sqsQueue+"?Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
-    WebSerial.println("GET "+sqsQueue+"?Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
     aws->doGet(sqsQueue, "Action=ReceiveMessage&MaxNumberOfMessages=1&WaitTimeSeconds=20");
     httpCallback = &receiveMessageCallback;
     requestRead.enable();
